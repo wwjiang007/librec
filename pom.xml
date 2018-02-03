@@ -89,6 +89,21 @@
 						<stylesheet>java</stylesheet>
 					</configuration>
 				</plugin>
+				<plugin>
+        			<groupId>org.apache.maven.plugins</groupId>
+        			<artifactId>maven-surefire-plugin</artifactId>
+        			<version>2.19.1</version>
+        			<configuration>
+          				<includes>
+            				<include>net.librec.recommender.cf.rating.*</include>
+          				</includes>
+          				<excludes>
+            				<exclude>net.librec.recommender.cf.rating.RfRecTestCase.java</exclude>
+            				<exclude>net.librec.recommender.cf.rating.FMSGDTestCase.java</exclude>
+            				<exclude>net.librec.recommender.cf.rating.FMALSTestCase.java</exclude>
+          				</excludes>
+        			</configuration>
+      			</plugin>
 			</plugins>
 		</pluginManagement>
 	</build>

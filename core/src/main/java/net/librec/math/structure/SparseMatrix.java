@@ -136,7 +136,7 @@ public class SparseMatrix implements Iterable<MatrixEntry>, DataMatrix, Serializ
         rowData = new double[data.length];
         for (int i = 0; i < rowData.length; i++) {
             rowData[i] = data[i];
-            valueSet.add(data[i]);
+            valueSetAdd(data[i]);
         }
 
         rowPtr = new int[ptr.length];
@@ -153,7 +153,7 @@ public class SparseMatrix implements Iterable<MatrixEntry>, DataMatrix, Serializ
         colData = new double[data.length];
         for (int i = 0; i < colData.length; i++) {
             colData[i] = data[i];
-            valueSet.add(data[i]);
+            valueSetAdd(data[i]);
         }
 
         colPtr = new int[ptr.length];
@@ -322,9 +322,15 @@ public class SparseMatrix implements Iterable<MatrixEntry>, DataMatrix, Serializ
 
         index = getCCSIndex(row, column);
         colData[index] = val;
-        valueSet.add(val);
+
+        valueSetAdd(val);
     }
 
+    private void valueSetAdd(double value){
+        if(value != 0.0) {
+            valueSet.add(value);
+        }
+    }
 
     /**
      * Add a value to entry [row, column]
@@ -706,16 +712,19 @@ public class SparseMatrix implements Iterable<MatrixEntry>, DataMatrix, Serializ
     /**
      * Normalize the matrix entries to (0, 1) by (x-min)/(max-min)
      *
-     * @param min minimum value
-     * @param max maximum value
+     * @param min
+     *            minimum value
+     * @param max
+     *            maximum value
      */
     public void normalize(double min, double max) {
         assert max > min;
+        for (int index = 0; index < rowData.length; index++) {
+            rowData[index] = (rowData[index] - min) / (max - min);
+        }
 
-        for (MatrixEntry me : this) {
-            double entry = me.get();
-            if (entry != 0)
-                me.set((entry - min) / (max - min));
+        for (int index = 0; index < colData.length; index++) {
+            colData[index] = (colData[index] - min) / (max - min);
         }
     }
 

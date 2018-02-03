@@ -28,8 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Jamali and Ester, <strong>A matrix factorization technique with trust propagation for recommendation in social
- * networks</strong>, RecSys 2010.
+ * Hao Ma, Haixuan Yang, Michael R. Lyu and Irwin King, <strong>SoRec: Social recommendation using probabilistic matrix
+ * factorization</strong>, ACM CIKM 2008.
  *
  * @author guoguibing and Keqiang Wang
  */
@@ -47,11 +47,13 @@ public class SoRecRecommender extends SocialRecommender {
     @Override
     public void setup() throws LibrecException {
         super.setup();
+        userFactors.init(1.0);
+        itemFactors.init(1.0);
         regRateSocial = conf.getFloat("rec.rate.social.regularization", 0.01f);
         regUserSocial = conf.getFloat("rec.user.social.regularization", 0.01f);
 
         userSocialFactors = new DenseMatrix(numUsers, numFactors);
-        userSocialFactors.init(initMean, initStd);
+        userSocialFactors.init(1.0);
 
         inDegrees = new ArrayList<>();
         outDegrees = new ArrayList<>();

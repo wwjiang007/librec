@@ -24,6 +24,8 @@ import net.librec.common.LibrecException;
 import net.librec.math.structure.*;
 import net.librec.recommender.FactorizationMachineRecommender;
 
+import java.util.Iterator;
+
 /**
  * Factorization Machine Recommender via Alternating Least Square
  *
@@ -67,12 +69,14 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
         // precomputing Q and errors, for efficiency
         DenseVector errors = new DenseVector(n);
         int ind = 0;
+        int userDimension = trainTensor.getUserDimension();
+        int itemDimension = trainTensor.getItemDimension();
         for (TensorEntry me : trainTensor) {
             int[] entryKeys = me.keys();
             SparseVector x = tenserKeysToFeatureVector(entryKeys);
 
             double rate = me.get();
-            double pred = predict(x);
+            double pred = predict(entryKeys[userDimension], entryKeys[itemDimension], x);
 
             double err = rate - pred;
             errors.set(ind, err);
@@ -97,7 +101,8 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
          */
 
         for (int iter = 0; iter < numIterations; iter++) {
-            double loss = 0.0;
+            lastLoss = loss;
+            loss = 0.0;
             // global bias
             double numerator = 0;
             double denominator = 0;
@@ -109,7 +114,7 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
             denominator += regW0;
             double newW0 = numerator / denominator;
 
-            System.out.println("original:" + errors.sum());
+            // System.out.println("original:" + errors.sum());
 
             // update errors
             for (int i = 0; i < n; i++) {
@@ -125,26 +130,38 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
 
             loss += regW0 * w0 * w0;
 
-            System.out.println("after 0-way:" + errors.sum());
+            // System.out.println("after 0-way:" + errors.sum());
 
             // 1-way interactions
             for (int l = 0; l < p; l++) {
                 double oldWl = W.get(l);
                 numerator = 0;
                 denominator = 0;
-                for (int i = 0; i < n; i++) {
-                    double h_theta = trainFeatureMatrix.get(i, l);
+
+                Iterator<VectorEntry> rowIter = trainFeatureMatrix.rowIterator(l);
+                while (rowIter.hasNext()) {
+                    VectorEntry vectorEntry = rowIter.next();
+                    double h_theta = vectorEntry.get();
+                    int i = vectorEntry.index();
                     numerator += oldWl * h_theta * h_theta + h_theta * errors.get(i);
                     denominator += h_theta * h_theta;
+
                 }
+
                 denominator += regW;
                 double newWl = numerator / denominator;
 
+
                 // update errors
-                for (int i = 0; i < n; i++) {
+                rowIter = trainFeatureMatrix.rowIterator(l);
+                while (rowIter.hasNext()) {
+                    VectorEntry vectorEntry = rowIter.next();
+                    int i = vectorEntry.index();
+
                     double oldErr = errors.get(i);
-                    double newErr = oldErr + (oldWl - newWl) * trainFeatureMatrix.get(i, l);
+                    double newErr = oldErr + (oldWl - newWl) * vectorEntry.get();
                     errors.set(i, newErr);
+
                 }
 
                 // update W
@@ -153,7 +170,7 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
                 loss += regW * oldWl * oldWl;
             }
 
-            System.out.println("after 1-way:" + errors.sum());
+            // System.out.println("after 1-way:" + errors.sum());
 
             // 2-way interactions
             for (int f = 0; f < k; f++) {
@@ -161,18 +178,25 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
                     double oldVlf = V.get(l, f);
                     numerator = 0;
                     denominator = 0;
-                    for (int i = 0; i < n; i++) {
-                        double x_val = trainFeatureMatrix.get(i, l);
+                    Iterator<VectorEntry> rowIter = trainFeatureMatrix.rowIterator(l);
+                    while (rowIter.hasNext()) {
+                        VectorEntry vectorEntry = rowIter.next();
+                        int i = vectorEntry.index();
+                        double x_val = vectorEntry.get();
                         double h_theta = x_val * (Q.get(i, f) - oldVlf * x_val);
                         numerator += oldVlf * h_theta * h_theta + h_theta * errors.get(i);
                         denominator += h_theta * h_theta;
+
                     }
                     denominator += regF;
                     double newVlf = numerator / denominator;
 
                     // update errors and Q
-                    for (int i = 0; i < n; i++) {
-                        double x_val = trainFeatureMatrix.get(i, l);
+                    rowIter = trainFeatureMatrix.rowIterator(l);
+                    while (rowIter.hasNext()) {
+                        VectorEntry vectorEntry = rowIter.next();
+                        int i = vectorEntry.index();
+                        double x_val = vectorEntry.get();
 
                         double oldQif = Q.get(i, f);
                         double update = (newVlf - oldVlf) * x_val;
@@ -188,6 +212,7 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
                         Q.set(i, f, newQif);
                     }
 
+
                     // update V
                     V.set(l, f, newVlf);
 
@@ -198,15 +223,15 @@ public class FMALSRecommender extends FactorizationMachineRecommender {
                 //System.out.println("temp:" + errors.sum());
             }
 
-            System.out.println("after 2-way:" + errors.sum());
-            if (isConverged(iter)  && earlyStop)
+            // System.out.println("after 2-way:" + errors.sum());
+            if (isConverged(iter) && earlyStop)
                 break;
         }
     }
 
     /**
      * This kind of prediction function cannot be applied to Factorization Machine.
-     *
+     * <p>
      * Using the predict() in FactorizationMachineRecommender class instead of this method.
      */
     @Deprecated

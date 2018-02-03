@@ -17,9 +17,11 @@
  */
 package net.librec.recommender.cf.rating;
 
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
 import net.librec.common.LibrecException;
 import net.librec.math.algorithm.Randoms;
-import net.librec.recommender.MatrixFactorizationRecommender;
+import net.librec.recommender.AbstractRecommender;
 import net.librec.util.Lists;
 import net.librec.util.ZeroSetter;
 
@@ -38,7 +40,7 @@ import java.util.Random;
  *
  * @author bin wu(Email:wubin@gs.zzu.edu.cn)
  */
-public class RBMRecommender extends MatrixFactorizationRecommender {
+public class RBMRecommender extends AbstractRecommender {
     int featureNumber;
     int softmax;
     int maxIter;
@@ -53,9 +55,9 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
     double[][] visbiases;
     double[] hidbiases;
 
-    double[][][] CDpos;
-    double[][][] CDneg;
-    double[][][] CDinc;
+    double[][][] cDpos;
+    double[][][] cDneg;
+    double[][][] cDinc;
 
     double[] poshidact;
     double[] neghidact;
@@ -70,9 +72,12 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
     double[][] visbiasinc;
     double[][] negvisprobs;
 
-    char[] negvissoftmax;
+    int[] negvissoftmax;
     int[] moviecount;
-    String PredictionType;
+    String predictionType;
+
+    BiMap<Double, Integer> ratingToIndex = HashBiMap.create();
+    BiMap<Integer, Double> indexToRating = HashBiMap.create();
 
     public RBMRecommender() {
 
@@ -80,25 +85,28 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
 
     protected void setup() throws LibrecException {
         super.setup();
-
         softmax = ratingScale.size();
-        this.maxIter = numIterations;
-        featureNumber = conf.getInt("-fn", 100);
-        epsilonw = conf.getDouble("-ew", 0.001);
-        epsilonvb = conf.getDouble("-evb", 0.001);
-        epsilonhb = conf.getDouble("-ehb", 0.001);
-        tSteps = conf.getInt("-t", 1);
-        momentum = conf.getDouble("-m", 0.0d);
-        lamtaw = conf.getDouble("-lw", 0.001);
-        lamtab = conf.getDouble("-lb", 0.0d);
-        PredictionType = conf.get("-p", "mean");
+        for (int i=0; i<softmax; i++) {
+            ratingToIndex.put(ratingScale.get(i), i);
+        }
+        indexToRating = ratingToIndex.inverse();
+        this.maxIter = conf.getInt("rec.iterator.maximum", 10);
+        featureNumber = conf.getInt("rec.factor.number", 500);
+        epsilonw = conf.getDouble("rec.epsilonw", 0.001);
+        epsilonvb = conf.getDouble("rec.epsilonvb", 0.001);
+        epsilonhb = conf.getDouble("rec.epsilonhb", 0.001);
+        tSteps = conf.getInt("rec.tstep", 1);
+        momentum = conf.getDouble("rec.momentum", 0.0d);
+        lamtaw = conf.getDouble("rec.lamtaw", 0.001);
+        lamtab = conf.getDouble("rec.lamtab", 0.0d);
+        predictionType = conf.get("rec.predictiontype", "mean");
         weights = new double[numItems][softmax][featureNumber];
         visbiases = new double[numItems][softmax];
         hidbiases = new double[featureNumber];
 
-        CDpos = new double[numItems][softmax][featureNumber];
-        CDneg = new double[numItems][softmax][featureNumber];
-        CDinc = new double[numItems][softmax][featureNumber];
+        cDpos = new double[numItems][softmax][featureNumber];
+        cDneg = new double[numItems][softmax][featureNumber];
+        cDinc = new double[numItems][softmax][featureNumber];
 
         poshidact = new double[featureNumber];
         neghidact = new double[featureNumber];
@@ -113,7 +121,7 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
         visbiasinc = new double[numItems][softmax];
         negvisprobs = new double[numItems][softmax];
 
-        negvissoftmax = new char[numItems];
+        negvissoftmax = new int[numItems];
         moviecount = new int[numItems];
 
         int[][] moviecount = new int[numItems][softmax];
@@ -121,7 +129,7 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
             int num = trainMatrix.rowSize(u);
             for (int j = 0; j < num; j++) {
                 int m = trainMatrix.row(u).getIndex()[j];
-                int r = (int) trainMatrix.get(u, m);
+                int r = ratingToIndex.get(trainMatrix.get(u, m));
                 moviecount[m][r]++;
             }
         }
@@ -144,8 +152,6 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
                     visbiases[i][k] = new Random().nextDouble() * 0.001;
                 } else {
                     visbiases[i][k] = Math.log(((double) moviecount[i][k]) / ((double) mtot));
-                    // visbiases[i][k] = Math.log(((moviecount[i][k]) + 1) /
-                    // (trainMatrix.columnSize(i)+ softmax));
                 }
             }
         }
@@ -154,7 +160,6 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
     @Override
     protected void trainModel() throws LibrecException {
         int loopcount = 0;
-        Random randn = new Random();
         while (loopcount < maxIter) {
             loopcount++;
             Zero();
@@ -170,7 +175,7 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
                 negvisprobs = new double[numItems][softmax];
                 for (int i = 0; i < num; i++) {
                     int m = trainMatrix.row(u).getIndex()[i];
-                    int r = (int) trainMatrix.get(u, m);
+                    int r = ratingToIndex.get(trainMatrix.get(u, m));
                     moviecount[m]++;
                     posvisact[m][r] += 1.0;
 
@@ -180,7 +185,7 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
                 }
                 for (int h = 0; h < featureNumber; h++) {
                     double probs = 1.0 / (1.0 + Math.exp(-sumW[h] - hidbiases[h]));
-                    if (probs > randn.nextDouble()) {
+                    if (probs > Randoms.random()) {
                         poshidstates[h] = 1;
                         poshidact[h] += 1.0;
                     } else {
@@ -218,18 +223,14 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
                             }
                         }
 
-                        double randval = randn.nextDouble();
+                        double randval = Randoms.random();
 
-                        if ((randval -= negvisprobs[m][0]) <= 0.0)
-                            negvissoftmax[m] = 0;
-                        else if ((randval -= negvisprobs[m][1]) <= 0.0)
-                            negvissoftmax[m] = 1;
-                        else if ((randval -= negvisprobs[m][2]) <= 0.0)
-                            negvissoftmax[m] = 2;
-                        else if ((randval -= negvisprobs[m][3]) <= 0.0)
-                            negvissoftmax[m] = 3;
-                        else
-                            negvissoftmax[m] = 4;
+                        for (int ratingIndex=0; ratingIndex<softmax; ratingIndex++) {
+                            if ((randval -= negvisprobs[m][ratingIndex]) <= 0.0) {
+                                negvissoftmax[m] = ratingIndex;
+                                break;
+                            }
+                        }
 
                         if (finalTStep)
                             negvisact[m][negvissoftmax[m]] += 1.0;
@@ -247,7 +248,7 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
                     for (int h = 0; h < featureNumber; h++) {
                         double probs = 1.0 / (1.0 + Math.exp(-sumW[h] - hidbiases[h]));
 
-                        if (probs > randn.nextDouble()) {
+                        if (probs > Randoms.random()) {
                             neghidstates[h] = 1;
                             if (finalTStep)
                                 neghidact[h] += 1.0;
@@ -266,13 +267,13 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
 
                 for (int i = 0; i < num; i++) {
                     int m = trainMatrix.row(u).getIndex()[i];
-                    int r = (int) trainMatrix.get(u, m);
+                    int r = ratingToIndex.get(trainMatrix.get(u, m));
 
                     for (int h = 0; h < featureNumber; h++) {
                         if (poshidstates[h] == 1) {
-                            CDpos[m][r][h] += 1.0;
+                            cDpos[m][r][h] += 1.0;
                         }
-                        CDneg[m][negvissoftmax[m]][h] += (double) neghidstates[h];
+                        cDneg[m][negvissoftmax[m]][h] += (double) neghidstates[h];
                     }
                 }
                 update(u, num);
@@ -294,14 +295,14 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
                 for (int h = 0; h < featureNumber; h++) {
 
                     for (int r = 0; r < softmax; r++) {
-                        double CDp = CDpos[m][r][h];
-                        double CDn = CDneg[m][r][h];
+                        double CDp = cDpos[m][r][h];
+                        double CDn = cDneg[m][r][h];
                         if (CDp != 0.0 || CDn != 0.0) {
                             CDp /= ((double) moviecount[m]);
                             CDn /= ((double) moviecount[m]);
-                            CDinc[m][r][h] = momentum * CDinc[m][r][h]
+                            cDinc[m][r][h] = momentum * cDinc[m][r][h]
                                     + epsilonw * ((CDp - CDn) - lamtaw * weights[m][r][h]);
-                            weights[m][r][h] += CDinc[m][r][h];
+                            weights[m][r][h] += cDinc[m][r][h];
                         }
                     }
                 }
@@ -329,8 +330,8 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
     }
 
     private void Zero() {
-        CDpos = new double[numItems][softmax][featureNumber];
-        CDneg = new double[numItems][softmax][featureNumber];
+        cDpos = new double[numItems][softmax][featureNumber];
+        cDneg = new double[numItems][softmax][featureNumber];
         poshidact = new double[featureNumber];
         neghidact = new double[featureNumber];
         posvisact = new double[numItems][softmax];
@@ -339,70 +340,57 @@ public class RBMRecommender extends MatrixFactorizationRecommender {
     }
 
     protected double predict(int u, int m) throws LibrecException {
-        double[][] negvisprobs = new double[numItems][softmax];
-        double[] poshidprobs = new double[featureNumber];
+        double[] scoreProbs = new double[softmax];
+        double[] factorProbs = new double[featureNumber];
         int trainNumber = trainMatrix.rowSize(u);
         double[] sumW = new double[featureNumber];
         for (int i = 0; i < trainNumber; i++) {
             int item = trainMatrix.row(u).getIndex()[i];
-            int rate = (int) trainMatrix.get(u, item);
+            int rateIdx = ratingToIndex.get(trainMatrix.get(u, item));
 
             for (int h = 0; h < featureNumber; h++) {
-                sumW[h] += weights[item][rate][h];
+                sumW[h] += weights[item][rateIdx][h];
             }
         }
 
         for (int h = 0; h < featureNumber; h++) {
-            poshidprobs[h] = 1.0 / (1.0 + Math.exp(0 - sumW[h] - hidbiases[h]));
+            factorProbs[h] = 1.0 / (1.0 + Math.exp(0 - sumW[h] - hidbiases[h]));
         }
 
-        for (int i = 0; i < trainNumber; i++) {
-            int item = trainMatrix.row(u).getIndex()[i];
-            for (int h = 0; h < featureNumber; h++) {
-                for (int r = 0; r < softmax; r++) {
-                    negvisprobs[item][r] += poshidprobs[h] * weights[item][r][h];
-                }
-            }
-
+        for (int h = 0; h < featureNumber; h++) {
             for (int r = 0; r < softmax; r++) {
-                negvisprobs[item][r] = 1.0 / (1.0 + Math.exp(0 - negvisprobs[item][r] - visbiases[item][r]));
-            }
-
-            double tsum = 0;
-            for (int r = 0; r < softmax; r++) {
-                tsum += negvisprobs[item][r];
-            }
-
-            if (tsum != 0) {
-                for (int r = 0; r < softmax; r++) {
-                    negvisprobs[item][r] /= tsum;
-                }
+                scoreProbs[r] += factorProbs[h] * weights[m][r][h];
             }
         }
+        double probSum = 0.0;
+        for (int r = 0; r < softmax; r++) {
+            scoreProbs[r] = 1.0 / (1.0 + Math.exp(0 - scoreProbs[r] - visbiases[m][r]));
+            probSum += scoreProbs[r];
+        }
+
+        for (int r=0; r<softmax; r++) {
+            scoreProbs[r] /= probSum;
+        }
+
         double predict = 0;
-        if (PredictionType.equals("max")) {
+        if (predictionType.equals("max")) {
 
             int max_index = 0;
-            double max_value = negvisprobs[m][0];
+            double max_value = scoreProbs[0];
             for (int r = 0; r < softmax; r++) {
-                if (negvisprobs[m][r] > max_value) {
-                    max_value = negvisprobs[m][r];
+                if (scoreProbs[r] > max_value) {
                     max_index = r;
                 }
             }
-            predict = max_index + 1;
-        } else if (PredictionType.equals("mean")) {
+            predict = indexToRating.get(max_index);
+        } else if (predictionType.equals("mean")) {
             double mean = 0.0;
             for (int r = 0; r < softmax; r++) {
-                mean += negvisprobs[m][r] * (r + 1);
+                mean += scoreProbs[r] * indexToRating.get(r);
             }
             predict = mean;
         }
         return predict;
     }
 
-}
-
-enum PredictionType {
-    MAX, MEAN
 }

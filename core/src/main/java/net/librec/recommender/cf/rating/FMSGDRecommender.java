@@ -20,16 +20,11 @@ package net.librec.recommender.cf.rating;
 
 import net.librec.annotation.ModelData;
 import net.librec.common.LibrecException;
-import net.librec.math.algorithm.Maths;
-import net.librec.math.algorithm.Randoms;
 import net.librec.math.structure.SparseVector;
 import net.librec.math.structure.TensorEntry;
 import net.librec.math.structure.VectorEntry;
 import net.librec.recommender.FactorizationMachineRecommender;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ExecutionException;
 
 /**
  * Stochastic Gradient Descent with Square Loss
@@ -39,7 +34,7 @@ import java.util.concurrent.ExecutionException;
  * @author Jiaxi Tang and Ma Chen
  */
 
-@ModelData({"isRanking", "fmals", "W", "V", "W0", "k"})
+@ModelData({"isRanking", "fmsgd", "W", "V", "W0", "k"})
 public class FMSGDRecommender extends FactorizationMachineRecommender {
     /**
      * learning rate of stochastic gradient descent
@@ -61,14 +56,17 @@ public class FMSGDRecommender extends FactorizationMachineRecommender {
 
     private void buildRatingModel() throws LibrecException {
         for (int iter = 0; iter < numIterations; iter++) {
-            double loss = 0.0;
+            lastLoss = loss;
+            loss = 0.0;
 
+            int userDimension = trainTensor.getUserDimension();
+            int itemDimension = trainTensor.getItemDimension();
             for (TensorEntry me : trainTensor) {
                 int[] entryKeys = me.keys();
-                SparseVector x = tenserKeysToFeatureVector(entryKeys);
+                SparseVector vector = tenserKeysToFeatureVector(entryKeys);
 
                 double rate = me.get();
-                double pred = predict(x);
+                double pred = predict(entryKeys[userDimension], entryKeys[itemDimension], vector);
 
                 double err = pred - rate;
                 loss += err * err;
@@ -84,11 +82,10 @@ public class FMSGDRecommender extends FactorizationMachineRecommender {
                 w0 += -learnRate * gradW0;
 
                 // 1-way interactions
-                for (int l = 0; l < p; l++) {
-                    if (!x.contains(l))
-                        continue;
-                    double oldWl = W.get(l);
-                    double hWl = x.get(l);
+                for(VectorEntry ve: vector){
+                    int l = ve.index();
+                   double oldWl = W.get(l);
+                    double hWl = ve.get();
                     double gradWl = gradLoss * hWl + regW * oldWl;
                     W.add(l, -learnRate * gradWl);
 
@@ -98,16 +95,20 @@ public class FMSGDRecommender extends FactorizationMachineRecommender {
                     for (int f = 0; f < k; f++) {
                         double oldVlf = V.get(l, f);
                         double hVlf = 0;
-                        double xl = x.get(l);
-                        for (int j = 0; j < p; j++) {
-                            if (j != l && x.contains(j))
-                                hVlf += xl * V.get(j, f) * x.get(j);
+                        double xl =ve.get();
+                        for(VectorEntry ve2: vector){
+                            int j = ve2.index();
+                            if(j!=l){
+                                hVlf += xl * V.get(j, f) * ve2.get();
+                            }
                         }
+
                         double gradVlf = gradLoss * hVlf + regF * oldVlf;
                         V.add(l, f, -learnRate * gradVlf);
                         loss += regF * oldVlf * oldVlf;
                     }
                 }
+
             }
 
             loss *= 0.5;
